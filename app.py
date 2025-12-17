@@ -14,24 +14,34 @@ st.subheader("1. Fiyat Listesi")
 uploaded_file = st.file_uploader("Güncel Fiyat Listesini Yükle (Excel)", type=["xlsx"])
 
 def clean_price(price):
-    """Fiyat sütunundaki €, TL gibi yazıları ve hataları temizler."""
+    """
+    Fiyat sütunundaki €, TL yazılarını temizler.
+    Binlik ayracı hatasını (822.36 -> 82236) önler.
+    """
     if pd.isna(price):
         return 0.0
     
+    # Eğer Excel zaten bunu sayı olarak okuduysa (float/int), hiç dokunma geri döndür.
+    if isinstance(price, (int, float)):
+        return float(price)
+    
     price_str = str(price)
     
-    # Excel hatalarını (#DEĞER!, #SAYI! vs) kontrol et
+    # Excel hatalarını kontrol et
     if "#" in price_str:
         return 0.0
         
-    # Para birimi simgelerini ve boşlukları temizle
+    # Para birimi simgelerini temizle
     price_str = price_str.replace('€', '').replace('TL', '').replace('$', '').strip()
     
-    # Türkiye formatı (1.000,00) -> Python formatı (1000.00) dönüşümü
-    # Önce binlik ayıracı olan noktayı kaldır
-    price_str = price_str.replace('.', '')
-    # Sonra ondalık ayıracı olan virgülü noktaya çevir
-    price_str = price_str.replace(',', '.')
+    # Sayı formatı temizliği
+    # Eğer sayı "1.250,50" gibiyse -> Noktayı sil, virgülü nokta yap.
+    if "." in price_str and "," in price_str:
+        price_str = price_str.replace('.', '') # Binlik ayracını kaldır
+        price_str = price_str.replace(',', '.') # Ondalığı nokta yap
+    # Eğer sadece virgül varsa (822,36) -> Virgülü nokta yap
+    elif "," in price_str:
+        price_str = price_str.replace(',', '.')
     
     try:
         return float(price_str)
@@ -43,26 +53,21 @@ def load_data(file):
         # Önce normal okumayı dene
         df = pd.read_excel(file)
         
-        # Eğer 'Urun_Kodu' başlığı bulunamazsa, muhtemelen başlıklar 2. satırdadır.
-        # Bir satır atlayarak tekrar oku.
+        # Başlık kontrolü (Urun_Kodu yoksa 2. satırı dene)
         if 'Urun_Kodu' not in df.columns:
             df = pd.read_excel(file, header=1)
             
-        # Hala bulunamadıysa hata ver
         if 'Urun_Kodu' not in df.columns:
-            st.error("HATA: Excel dosyasında 'Urun_Kodu' sütunu bulunamadı. Başlıkların doğru yazıldığından emin olun.")
+            st.error("HATA: 'Urun_Kodu' başlığı bulunamadı.")
             return None
 
-        # Sütun isimlerindeki boşlukları temizle
         df.columns = df.columns.str.strip()
         
-        # Fiyat sütununu temizle ve sayıya çevir
-        # Fiyat sütununun adını bul (Bazen boşluklu olabilir 'Fiyat ' gibi)
+        # Fiyat sütununu bul ve temizle
         fiyat_col = [col for col in df.columns if 'Fiyat' in col]
         if fiyat_col:
             col_name = fiyat_col[0]
             df[col_name] = df[col_name].apply(clean_price)
-            # Kolaylık olsun diye adını standartlaştıralım
             df.rename(columns={col_name: 'Fiyat'}, inplace=True)
             
         return df
@@ -81,7 +86,6 @@ if uploaded_file is not None:
         
         arama_kelimesi = st.text_input("Ürün Ara (Kod veya İsim):", "")
         
-        # Fiyatı 0 olanları (Hatalı satırları) aramada gösterme
         df_clean = df[df['Fiyat'] > 0]
         
         if arama_kelimesi:
@@ -91,7 +95,6 @@ if uploaded_file is not None:
         else:
             filtrelenmis_df = df_clean.head(10)
 
-        # Seçim Kutusu
         secilen_urunler = st.multiselect(
             "Teklife Eklenecek Ürünleri Seç:",
             options=filtrelenmis_df['Urun_Kodu'].tolist(),
@@ -100,7 +103,7 @@ if uploaded_file is not None:
 
         # --- 3. Hesaplama ---
         if secilen_urunler:
-            st.subheader("3. Detaylar")
+            st.subheader("3. Detaylar (Para Birimi: Euro)")
             
             sepet_verisi = []
             for kod in secilen_urunler:
@@ -118,7 +121,7 @@ if uploaded_file is not None:
                 sepet_df,
                 column_config={
                     "Adet": st.column_config.NumberColumn("Miktar", min_value=1, step=1),
-                    "Liste_Fiyati": st.column_config.NumberColumn("Liste Fiyatı", format="%.2f ₺")
+                    "Liste_Fiyati": st.column_config.NumberColumn("Liste Fiyatı", format="%.2f €")
                 },
                 hide_index=True,
                 disabled=["Urun_Kodu", "Urun_Adi", "Liste_Fiyati"]
@@ -138,7 +141,7 @@ if uploaded_file is not None:
             duzenlenmis_df['Toplam_Tutar'] = duzenlenmis_df['Birim_Son_Fiyat'] * duzenlenmis_df['Adet']
             genel_toplam = duzenlenmis_df['Toplam_Tutar'].sum()
 
-            st.metric(label="TOPLAM TUTAR", value=f"{genel_toplam:,.2f} ₺")
+            st.metric(label="TOPLAM TUTAR (Euro)", value=f"€ {genel_toplam:,.2f}")
 
             # --- 4. İndirme ---
             if st.button("Teklif Oluştur (Excel)"):
@@ -147,15 +150,19 @@ if uploaded_file is not None:
                     duzenlenmis_df.to_excel(writer, index=False, sheet_name='Teklif')
                     workbook = writer.book
                     worksheet = writer.sheets['Teklif']
-                    para_format = workbook.add_format({'num_format': '#,##0.00 ₺'})
-                    worksheet.set_column('C:E', 15, para_format)
+                    
+                    # Euro formatı
+                    para_format = workbook.add_format({'num_format': '€ #,##0.00'})
+                    
+                    worksheet.set_column('C:C', 15, para_format) # Liste Fiyatı
+                    worksheet.set_column('E:F', 15, para_format) # Son Fiyat ve Toplam
                     worksheet.set_column('B:B', 30)
 
                 output.seek(0)
                 tarih = datetime.datetime.now().strftime("%Y-%m-%d")
                 st.download_button(
-                    "📥 Excel İndir",
+                    "📥 Excel İndir (Euro)",
                     data=output,
-                    file_name=f"Teklif_{tarih}.xlsx",
+                    file_name=f"Teklif_EURO_{tarih}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
