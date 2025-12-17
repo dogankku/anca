@@ -5,12 +5,59 @@ import datetime
 import os
 
 # --- Sayfa Ayarları ---
-st.set_page_config(page_title="Rulman Fiyat Listesi", layout="centered")
+st.set_page_config(page_title="Rulman Satış Portalı", layout="centered")
+
+# ==========================================
+# 🔐 GÜVENLİK AYARLARI (ŞİFRE EKRANI)
+# ==========================================
+
+# Buraya ekibinle paylaşacağın şifreyi yaz:
+SIFRE = "akca.2025" 
+
+def check_password():
+    """Returns `True` if the user had the correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if st.session_state["password"] == SIFRE:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Şifreyi hafızadan sil (güvenlik)
+        else:
+            st.session_state["password_correct"] = False
+
+    if "password_correct" not in st.session_state:
+        # İlk giriş durumu
+        st.text_input(
+            "Lütfen Giriş Şifresini Yazınız:", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        return False
+    elif not st.session_state["password_correct"]:
+        # Hatalı şifre durumu
+        st.text_input(
+            "Lütfen Giriş Şifresini Yazınız:", 
+            type="password", 
+            on_change=password_entered, 
+            key="password"
+        )
+        st.error("😕 Hatalı şifre. Tekrar deneyin.")
+        return False
+    else:
+        # Şifre doğru durumu
+        return True
+
+if not check_password():
+    st.stop()  # Şifre girilmediyse kodun geri kalanını çalıştırma!
+
+# ==========================================
+# 🚀 UYGULAMA BAŞLIYOR (Şifre Girildiyse Burası Çalışır)
+# ==========================================
 
 st.title("🔩 Satış Teklif Robotu")
 
 # --- 0. Sepet (Session State) Kurulumu ---
-# Program hafızasında bir sepet oluşturuyoruz. Sayfa yenilense bile silinmez.
 if 'sepet' not in st.session_state:
     st.session_state['sepet'] = pd.DataFrame(columns=['Urun_Kodu', 'Urun_Adi', 'Liste_Fiyati', 'Adet', 'Secim_Ismi'])
 
@@ -20,7 +67,7 @@ SABIT_DOSYA_ADI = "fiyatlar.xlsx"
 @st.cache_data
 def load_data_from_repo():
     if not os.path.exists(SABIT_DOSYA_ADI):
-        return None, f"HATA: '{SABIT_DOSYA_ADI}' dosyası bulunamadı."
+        return None, f"HATA: '{SABIT_DOSYA_ADI}' dosyası sistemde bulunamadı. GitHub'a yüklediğinden emin ol."
     
     try:
         df = pd.read_excel(SABIT_DOSYA_ADI)
@@ -31,7 +78,6 @@ def load_data_from_repo():
 
         df.columns = df.columns.str.strip()
         
-        # Fiyat temizliği
         fiyat_col = [col for col in df.columns if 'Fiyat' in col]
         if fiyat_col:
             col_name = fiyat_col[0]
@@ -51,7 +97,8 @@ def load_data_from_repo():
         df['Urun_Kodu'] = df['Urun_Kodu'].astype(str)
         df['Urun_Adi'] = df['Urun_Adi'].astype(str)
         df = df.drop_duplicates()
-        # Benzersiz İsim Oluştur
+        
+        # Benzersiz İsim
         df['Secim_Ismi'] = df['Urun_Kodu'] + " - " + df['Urun_Adi'] + " (" + df['Fiyat'].apply(lambda x: f"{x:.2f}") + " €)"
         
         return df, None
@@ -63,7 +110,7 @@ df, error_msg = load_data_from_repo()
 if error_msg:
     st.error(error_msg)
 elif df is not None:
-    # --- 2. Ürün Ekleme Alanı ---
+    # --- 2. Ürün Ekleme ---
     st.subheader("1. Ürün Ekle")
     
     col_ara, col_ekle = st.columns([3, 1])
@@ -83,53 +130,42 @@ elif df is not None:
         
         secenekler = filtrelenmis_df['Secim_Ismi'].tolist()
         
-        # Seçim Kutusu (Burada seçip butona basacaksın)
         secilen_yeni_urunler = st.multiselect("Listeden Seçiniz:", options=secenekler, key="urun_secici")
 
     with col_ekle:
-        st.write("") # Boşluk
-        st.write("") # Boşluk
-        if st.button("➕ Listeye Ekle", type="primary"):
+        st.write("") 
+        st.write("") 
+        if st.button("➕ Ekle", type="primary"):
             if secilen_yeni_urunler:
-                # Seçilenleri ana veriden bul
                 yeni_df = df_clean[df_clean['Secim_Ismi'].isin(secilen_yeni_urunler)].copy()
                 yeni_df['Adet'] = 1
                 yeni_df = yeni_df[['Urun_Kodu', 'Urun_Adi', 'Fiyat', 'Adet', 'Secim_Ismi']]
                 yeni_df.rename(columns={'Fiyat': 'Liste_Fiyati'}, inplace=True)
                 
-                # Mevcut sepete ekle (concat)
                 st.session_state['sepet'] = pd.concat([st.session_state['sepet'], yeni_df], ignore_index=True)
-                # Aynı ürün varsa alt alta ekler, kullanıcı birleştirmek isterse manuel yapar veya kod geliştirilebilir.
-                st.success(f"{len(secilen_yeni_urunler)} ürün eklendi!")
-                st.rerun() # Sayfayı yenile ki tablo güncellensin
+                st.rerun()
 
-    # --- 3. Sepet (Düzenleme ve Silme) ---
+    # --- 3. Sepet ---
     st.write("---")
-    st.subheader("2. Teklif Listesi (Düzenle / Sil)")
+    st.subheader("2. Teklif Listesi")
     
     if not st.session_state['sepet'].empty:
-        st.info("💡 İpucu: Listeden ürün silmek için satırı seçip 'Delete' tuşuna basın veya tablonun sağındaki çöp kutusuna tıklayın.")
-        
-        # Data Editor: Buradaki değişiklikler anında kaydedilir
-        # num_rows="dynamic" özelliği satır ekleme/silme imkanı verir
         duzenlenmis_sepet = st.data_editor(
             st.session_state['sepet'],
             column_config={
                 "Adet": st.column_config.NumberColumn("Adet", min_value=1, step=1),
                 "Liste_Fiyati": st.column_config.NumberColumn("Liste Fiyatı", format="%.2f €", disabled=True),
-                "Secim_Ismi": None, # Bu sütunu tabloda gizle, kalabalık etmesin
+                "Secim_Ismi": None,
             },
             hide_index=True,
-            num_rows="dynamic", # SİLME ÖZELLİĞİNİ BU AÇIYOR
-            key="sepet_editor" # Benzersiz ID
+            num_rows="dynamic",
+            key="sepet_editor"
         )
         
-        # Sepeti güncelle (Eğer kullanıcı sildiyse veya adet değiştirdiyse)
-        # Sadece boş olmayan satırları tut (Kullanıcı boş satır eklerse diye önlem)
         duzenlenmis_sepet = duzenlenmis_sepet[duzenlenmis_sepet['Urun_Kodu'].notna()]
         st.session_state['sepet'] = duzenlenmis_sepet
 
-        # --- 4. Hesaplama ve Çıktı ---
+        # --- 4. Hesaplama ---
         st.write("---")
         
         col1, col2 = st.columns(2)
@@ -138,7 +174,6 @@ elif df is not None:
         with col2:
             oran = st.number_input("Yüzde:", min_value=0.0, value=0.0, step=1.0)
 
-        # Hesaplamalar
         teklif_df = st.session_state['sepet'].copy()
         
         if hesap_tipi == "İskonto (%)":
@@ -151,17 +186,14 @@ elif df is not None:
 
         st.metric(label="TOPLAM (Euro)", value=f"€ {genel_toplam:,.2f}")
 
-        # İndirme Butonu
+        # İndirme
         output = BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            # Çıktıda gereksiz sütunları atalım
             cikti_df = teklif_df[['Urun_Kodu', 'Urun_Adi', 'Adet', 'Liste_Fiyati', 'Birim_Son_Fiyat', 'Toplam_Tutar']]
             cikti_df.to_excel(writer, index=False, sheet_name='Teklif')
-            
             workbook = writer.book
             worksheet = writer.sheets['Teklif']
             para_format = workbook.add_format({'num_format': '€ #,##0.00'})
-            
             worksheet.set_column('D:F', 15, para_format)
             worksheet.set_column('B:B', 30)
 
@@ -175,10 +207,9 @@ elif df is not None:
             type="primary"
         )
         
-        # Sepeti Temizle Butonu
-        if st.button("🗑️ Tüm Listeyi Temizle"):
+        if st.button("🗑️ Temizle"):
             st.session_state['sepet'] = pd.DataFrame(columns=['Urun_Kodu', 'Urun_Adi', 'Liste_Fiyati', 'Adet', 'Secim_Ismi'])
             st.rerun()
-
     else:
-        st.info("Sepetiniz boş. Yukarıdan ürün arayıp ekleyebilirsiniz.")
+        st.info("Sepetiniz boş.")
+
