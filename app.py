@@ -6,24 +6,68 @@ import datetime
 # --- Sayfa Ayarları ---
 st.set_page_config(page_title="Rulman Teklif Hazırlayıcı", layout="centered")
 
-# --- Başlık ve Logo Alanı ---
 st.title("🔩 Satış Ekibi Teklif Robotu")
 st.write("Müşteri sahasında hızlı teklif oluşturmak için tasarlanmıştır.")
 
-# --- 1. Veri Yükleme (Excel Dosyası) ---
-# Gerçek hayatta bu dosya sabit bir yerde durabilir, şimdilik yükleme yapıyoruz.
+# --- 1. Veri Yükleme ---
 st.subheader("1. Fiyat Listesi")
 uploaded_file = st.file_uploader("Güncel Fiyat Listesini Yükle (Excel)", type=["xlsx"])
 
+def clean_price(price):
+    """Fiyat sütunundaki €, TL gibi yazıları ve hataları temizler."""
+    if pd.isna(price):
+        return 0.0
+    
+    price_str = str(price)
+    
+    # Excel hatalarını (#DEĞER!, #SAYI! vs) kontrol et
+    if "#" in price_str:
+        return 0.0
+        
+    # Para birimi simgelerini ve boşlukları temizle
+    price_str = price_str.replace('€', '').replace('TL', '').replace('$', '').strip()
+    
+    # Türkiye formatı (1.000,00) -> Python formatı (1000.00) dönüşümü
+    # Önce binlik ayıracı olan noktayı kaldır
+    price_str = price_str.replace('.', '')
+    # Sonra ondalık ayıracı olan virgülü noktaya çevir
+    price_str = price_str.replace(',', '.')
+    
+    try:
+        return float(price_str)
+    except ValueError:
+        return 0.0
+
 def load_data(file):
     try:
-        # Excel okuma
+        # Önce normal okumayı dene
         df = pd.read_excel(file)
-        # Sütun isimlerini standartlaştıralım (Boşlukları sil vs)
+        
+        # Eğer 'Urun_Kodu' başlığı bulunamazsa, muhtemelen başlıklar 2. satırdadır.
+        # Bir satır atlayarak tekrar oku.
+        if 'Urun_Kodu' not in df.columns:
+            df = pd.read_excel(file, header=1)
+            
+        # Hala bulunamadıysa hata ver
+        if 'Urun_Kodu' not in df.columns:
+            st.error("HATA: Excel dosyasında 'Urun_Kodu' sütunu bulunamadı. Başlıkların doğru yazıldığından emin olun.")
+            return None
+
+        # Sütun isimlerindeki boşlukları temizle
         df.columns = df.columns.str.strip()
+        
+        # Fiyat sütununu temizle ve sayıya çevir
+        # Fiyat sütununun adını bul (Bazen boşluklu olabilir 'Fiyat ' gibi)
+        fiyat_col = [col for col in df.columns if 'Fiyat' in col]
+        if fiyat_col:
+            col_name = fiyat_col[0]
+            df[col_name] = df[col_name].apply(clean_price)
+            # Kolaylık olsun diye adını standartlaştıralım
+            df.rename(columns={col_name: 'Fiyat'}, inplace=True)
+            
         return df
     except Exception as e:
-        st.error(f"Hata: {e}")
+        st.error(f"Dosya okuma hatası: {e}")
         return None
 
 if uploaded_file is not None:
@@ -32,49 +76,44 @@ if uploaded_file is not None:
     if df is not None:
         st.success(f"✅ Liste Yüklendi! Toplam {len(df)} ürün var.")
         
-        # --- 2. Ürün Seçimi ve Filtreleme ---
+        # --- 2. Ürün Seçimi ---
         st.subheader("2. Ürün Seçimi")
         
-        # Kullanıcı ürün kodundan veya isminden arama yapabilir
-        # Varsayalım sütun adları: 'Urun_Kodu', 'Urun_Adi', 'Fiyat'
-        # Eğer senin sütun adların farklıysa buraları değiştireceğiz.
-        
-        # Arama kutusu
         arama_kelimesi = st.text_input("Ürün Ara (Kod veya İsim):", "")
         
+        # Fiyatı 0 olanları (Hatalı satırları) aramada gösterme
+        df_clean = df[df['Fiyat'] > 0]
+        
         if arama_kelimesi:
-            # Hem kodda hem isimde arama yap
-            filtrelenmis_df = df[
-                df.apply(lambda row: row.astype(str).str.contains(arama_kelimesi, case=False).any(), axis=1)
+            filtrelenmis_df = df_clean[
+                df_clean.apply(lambda row: row.astype(str).str.contains(arama_kelimesi, case=False).any(), axis=1)
             ]
         else:
-            filtrelenmis_df = df.head(10) # Arama yoksa ilk 10'u göster (Mobil hızı için)
+            filtrelenmis_df = df_clean.head(10)
 
-        # Seçim kutusu (Multiselect)
+        # Seçim Kutusu
         secilen_urunler = st.multiselect(
             "Teklife Eklenecek Ürünleri Seç:",
-            options=filtrelenmis_df['Urun_Kodu'].tolist(), # Listede görünecek kısım
-            format_func=lambda x: f"{x} - {df[df['Urun_Kodu'] == x]['Urun_Adi'].values[0]}" # Daha detaylı görünüm
+            options=filtrelenmis_df['Urun_Kodu'].tolist(),
+            format_func=lambda x: f"{x} - {df_clean[df_clean['Urun_Kodu'] == x]['Urun_Adi'].values[0]}"
         )
 
-        # --- 3. Adet ve Kâr Marjı Girişi ---
+        # --- 3. Hesaplama ---
         if secilen_urunler:
-            st.subheader("3. Detaylar ve Hesaplama")
+            st.subheader("3. Detaylar")
             
-            # Seçilenler için bir tablo oluşturuyoruz
             sepet_verisi = []
             for kod in secilen_urunler:
-                satir = df[df['Urun_Kodu'] == kod].iloc[0]
+                satir = df_clean[df_clean['Urun_Kodu'] == kod].iloc[0]
                 sepet_verisi.append({
                     'Urun_Kodu': satir['Urun_Kodu'],
                     'Urun_Adi': satir['Urun_Adi'],
-                    'Liste_Fiyati': satir['Fiyat'], # Excel'deki ham fiyat
-                    'Adet': 1 # Varsayılan adet
+                    'Liste_Fiyati': satir['Fiyat'],
+                    'Adet': 1
                 })
             
             sepet_df = pd.DataFrame(sepet_verisi)
 
-            # Kullanıcıya adetleri düzenleme imkanı ver (Data Editor - Yeni Özellik)
             duzenlenmis_df = st.data_editor(
                 sepet_df,
                 column_config={
@@ -82,52 +121,41 @@ if uploaded_file is not None:
                     "Liste_Fiyati": st.column_config.NumberColumn("Liste Fiyatı", format="%.2f ₺")
                 },
                 hide_index=True,
-                disabled=["Urun_Kodu", "Urun_Adi", "Liste_Fiyati"] # Sadece adeti değiştirsin
+                disabled=["Urun_Kodu", "Urun_Adi", "Liste_Fiyati"]
             )
 
-            # İskonto veya Kâr Marjı Ayarı
-            hesap_tipi = st.radio("Fiyatlandırma Yöntemi:", ["İskonto Yap (%)", "Kâr Ekle (%)"], horizontal=True)
-            oran = st.slider("Oran Giriniz:", 0, 100, 10)
+            col1, col2 = st.columns(2)
+            with col1:
+                hesap_tipi = st.radio("Yöntem:", ["İskonto (%)", "Kâr Ekle (%)"])
+            with col2:
+                oran = st.number_input("Oran:", min_value=0.0, value=10.0)
 
-            # Hesaplamaları Yap
-            if hesap_tipi == "İskonto Yap (%)":
+            if hesap_tipi == "İskonto (%)":
                 duzenlenmis_df['Birim_Son_Fiyat'] = duzenlenmis_df['Liste_Fiyati'] * (1 - oran/100)
             else:
                 duzenlenmis_df['Birim_Son_Fiyat'] = duzenlenmis_df['Liste_Fiyati'] * (1 + oran/100)
 
             duzenlenmis_df['Toplam_Tutar'] = duzenlenmis_df['Birim_Son_Fiyat'] * duzenlenmis_df['Adet']
-            
             genel_toplam = duzenlenmis_df['Toplam_Tutar'].sum()
 
-            st.write("---")
-            st.metric(label="GENEL TOPLAM (KDV Hariç)", value=f"{genel_toplam:,.2f} ₺")
+            st.metric(label="TOPLAM TUTAR", value=f"{genel_toplam:,.2f} ₺")
 
-            # --- 4. Çıktı Alma (Excel İndirme) ---
-            st.subheader("4. Teklifi İndir")
-            
-            firma_adi = st.text_input("Müşteri Firma Adı:", "Genel Müşteri")
-            
-            # Excel oluşturma butonu
-            if st.button("Teklif Dosyasını Oluştur"):
+            # --- 4. İndirme ---
+            if st.button("Teklif Oluştur (Excel)"):
                 output = BytesIO()
                 with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                     duzenlenmis_df.to_excel(writer, index=False, sheet_name='Teklif')
                     workbook = writer.book
                     worksheet = writer.sheets['Teklif']
-                    
-                    # Biraz formatlayalım
                     para_format = workbook.add_format({'num_format': '#,##0.00 ₺'})
-                    worksheet.set_column('D:E', 15, para_format) # Fiyat sütunları
-                    worksheet.set_column('B:B', 30) # Ürün adı geniş olsun
+                    worksheet.set_column('C:E', 15, para_format)
+                    worksheet.set_column('B:B', 30)
 
                 output.seek(0)
-                
                 tarih = datetime.datetime.now().strftime("%Y-%m-%d")
-                dosya_ismi = f"Teklif_{firma_adi}_{tarih}.xlsx"
-
                 st.download_button(
-                    label="📥 Excel Olarak İndir",
+                    "📥 Excel İndir",
                     data=output,
-                    file_name=dosya_ismi,
+                    file_name=f"Teklif_{tarih}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
