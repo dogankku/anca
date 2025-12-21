@@ -29,13 +29,13 @@ def check_password():
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        st.text_input("Kullanıcı Adı", key="login_user")
-        st.text_input("Şifre", type="password", key="login_pass")
+        st.text_input("Kullanıcı Adı", key="login_user_key")
+        st.text_input("Şifre", type="password", key="login_pass_key")
         st.button("Giriş Yap", on_click=password_entered)
         return False
     elif not st.session_state["password_correct"]:
-        st.text_input("Kullanıcı Adı", key="login_user_retry")
-        st.text_input("Şifre", type="password", key="login_pass_retry")
+        st.text_input("Kullanıcı Adı", key="login_user_retry_key")
+        st.text_input("Şifre", type="password", key="login_pass_retry_key")
         st.button("Giriş Yap", on_click=password_entered)
         st.error("😕 Hatalı giriş.")
         return False
@@ -64,11 +64,11 @@ def mail_gonder_generic(alici_email, konu, html_icerik):
 
         msg.attach(MIMEText(html_icerik, 'html'))
 
-        # SSL Context (Güvenlik Duvarını Aşmak İçin - Port 465 Özel)
+        # SSL Bağlantı Hatası Çözümü (Legacy Renegotiation)
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        ctx.options |= 0x4 
+        ctx.options |= 0x4 # OP_LEGACY_SERVER_CONNECT
         
         server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=ctx)
         server.login(sender_email, sender_password)
@@ -146,23 +146,23 @@ if check_password():
         st.header("📍 Ziyaret Raporu")
         ws_ziyaret = sh.worksheet("Ziyaretler")
         
-        with st.form("ziyaret_form"):
+        with st.form("ziyaret_form_unique"):
             c1, c2, c3 = st.columns(3)
             with c1:
-                tarih = st.date_input("Tarih", datetime.today())
-                firma = st.text_input("Firma Adı")
+                tarih = st.date_input("Tarih", datetime.today(), key="ziyaret_tarih")
+                firma = st.text_input("Firma Adı", key="ziyaret_firma")
             with c2:
-                kisi = st.text_input("Görüşülen Kişi")
-                email = st.text_input("E-Posta")
+                kisi = st.text_input("Görüşülen Kişi", key="ziyaret_kisi")
+                email = st.text_input("E-Posta", key="ziyaret_email")
             with c3:
-                durum = st.selectbox("Durum", ["Tanışma", "Teklif", "Sıcak Satış", "Satış Kapandı"])
-                urunler = st.multiselect("Ürünler", ["Rulman", "ZKL", "Kinex", "Sensimore", "Hizmet"])
-                potansiyel = st.number_input("Potansiyel (TL)", step=1000)
+                durum = st.selectbox("Durum", ["Tanışma", "Teklif", "Sıcak Satış", "Satış Kapandı"], key="ziyaret_durum")
+                urunler = st.multiselect("Ürünler", ["Rulman", "ZKL", "Kinex", "Sensimore", "Hizmet"], key="ziyaret_urunler")
+                potansiyel = st.number_input("Potansiyel (TL)", step=1000, key="ziyaret_potansiyel")
 
-            notlar = st.text_area("Notlar")
-            mail_at = st.checkbox("Teşekkür Maili Gönder")
+            notlar = st.text_area("Notlar", key="ziyaret_notlar")
+            mail_at = st.checkbox("Teşekkür Maili Gönder", key="ziyaret_mail_chk")
             if st.form_submit_button("Kaydet"):
-                # Çift Durum sütunu hatasını önlemek için boşlukları temizleyerek gönderiyoruz
+                # Excel'deki olası hataları önlemek için güvenli kayıt
                 ws_ziyaret.append_row([str(tarih), firma, "", kisi, "", email, durum, "", ", ".join(urunler), potansiyel, "", "", "", "", notlar, str(datetime.now())])
                 st.success("Kaydedildi.")
                 if mail_at and email:
@@ -185,7 +185,6 @@ if check_password():
             mail_sozlugu = {}
             
             if not df_ziyaret.empty:
-                # Sütun isimlerindeki olası boşlukları temizle
                 df_ziyaret.columns = df_ziyaret.columns.str.strip()
                 if "Firma Adı" in df_ziyaret.columns:
                     firmalar = [x for x in df_ziyaret["Firma Adı"].unique() if x]
@@ -202,19 +201,19 @@ if check_password():
         # --- A. ÜST BİLGİLER ---
         col_m1, col_m2, col_m3 = st.columns([2, 1, 1])
         with col_m1:
-            secilen_musteri = st.selectbox("Müşteri Seçiniz", musteri_listesi, key="teklif_musteri_unique") # KEY EKLENDİ
+            secilen_musteri = st.selectbox("Müşteri Seçiniz", musteri_listesi, key="teklif_musteri_secim_key")
             if secilen_musteri == "➕ Yeni Müşteri":
-                final_musteri = st.text_input("Müşteri Ünvanı Giriniz", key="teklif_yeni_musteri_input")
+                final_musteri = st.text_input("Müşteri Ünvanı Giriniz", key="teklif_yeni_musteri_input_key")
                 otomatik_mail = ""
             else:
                 final_musteri = secilen_musteri
                 otomatik_mail = mail_sozlugu.get(final_musteri, "")
         
         with col_m2:
-            teklif_tarihi = st.date_input("Tarih", datetime.today(), key="teklif_tarih")
+            teklif_tarihi = st.date_input("Tarih", datetime.today(), key="teklif_tarih_key")
         with col_m3:
-            # ÖNEMLİ: Burada 'key' ekleyerek Fiyat Listesi ile karışmasını engelledik
-            para_birimi = st.selectbox("Para Birimi", ["TL", "USD", "EUR"], key="teklif_para_birimi_master")
+            # KRİTİK DÜZELTME: Benzersiz KEY eklendi
+            para_birimi = st.selectbox("Para Birimi", ["TL", "USD", "EUR"], key="teklif_para_birimi_ozel_key")
 
         # --- B. ÜRÜN EKLEME ALANI ---
         st.markdown("---")
@@ -224,7 +223,7 @@ if check_password():
         urun_etiketleri = [""] + (df_fiyat['Urun Adi'].tolist() if not df_fiyat.empty else [])
         
         with col_u1:
-            secilen_urun_liste = st.selectbox("Listeden Ürün Seç", urun_etiketleri, key="teklif_urun_secimi")
+            secilen_urun_liste = st.selectbox("Listeden Ürün Seç", urun_etiketleri, key="teklif_urun_secimi_key")
             otomatik_fiyat = 0.0
             manuel_urun_adi = ""
             if secilen_urun_liste and not df_fiyat.empty:
@@ -235,15 +234,15 @@ if check_password():
                     otomatik_fiyat = 0.0
                 manuel_urun_adi = secilen_urun_liste
 
-            final_urun_adi = st.text_input("Ürün Adı (Düzenlenebilir)", value=manuel_urun_adi, key="teklif_urun_adi_input")
+            final_urun_adi = st.text_input("Ürün Adı (Düzenlenebilir)", value=manuel_urun_adi, key="teklif_urun_adi_input_key")
 
         with col_u2:
-            adet = st.number_input("Adet", min_value=1, value=1, key="teklif_adet")
+            adet = st.number_input("Adet", min_value=1, value=1, key="teklif_adet_key")
         with col_u3:
-            birim_fiyat = st.number_input("Birim Fiyat", value=otomatik_fiyat, min_value=0.0, format="%.2f", key="teklif_birim_fiyat")
+            birim_fiyat = st.number_input("Birim Fiyat", value=otomatik_fiyat, min_value=0.0, format="%.2f", key="teklif_birim_fiyat_key")
         with col_u4:
             st.write("##")
-            if st.button("➕ Listeye Ekle", type="primary", key="teklif_ekle_btn"):
+            if st.button("➕ Listeye Ekle", type="primary", key="teklif_ekle_btn_key"):
                 if final_urun_adi:
                     tutar = adet * birim_fiyat
                     st.session_state.sepet.append({
@@ -264,8 +263,8 @@ if check_password():
             
             col_sil, _ = st.columns([1, 4])
             with col_sil:
-                silinecek_index = st.number_input("Silinecek Sıra No", min_value=0, max_value=len(st.session_state.sepet)-1, step=1, key="sil_index")
-                if st.button("🗑️ Sil", key="sil_btn"):
+                silinecek_index = st.number_input("Silinecek Sıra No", min_value=0, max_value=len(st.session_state.sepet)-1, step=1, key="sil_index_key")
+                if st.button("🗑️ Sil", key="sil_btn_key"):
                     st.session_state.sepet.pop(silinecek_index)
                     st.rerun()
 
@@ -275,11 +274,11 @@ if check_password():
             ara_toplam = sum(item['Toplam'] for item in st.session_state.sepet)
             
             with c_calc1:
-                iskonto_orani = st.number_input("İskonto (%)", 0.0, 100.0, 0.0, key="iskonto_input")
+                iskonto_orani = st.number_input("İskonto (%)", 0.0, 100.0, 0.0, key="iskonto_input_key")
                 iskonto_tutari = ara_toplam * (iskonto_orani / 100)
                 
             with c_calc2:
-                kdv_orani = st.number_input("KDV (%)", 0.0, 100.0, 20.0, key="kdv_input")
+                kdv_orani = st.number_input("KDV (%)", 0.0, 100.0, 20.0, key="kdv_input_key")
                 matrah = ara_toplam - iskonto_tutari
                 kdv_tutari = matrah * (kdv_orani / 100)
 
@@ -292,14 +291,14 @@ if check_password():
             st.markdown("---")
             col_mail, col_btn = st.columns([2, 1])
             with col_mail:
-                teklif_mail = st.text_input("Alıcı E-Posta", value=otomatik_mail, key="teklif_alici_mail")
-                notlar = st.text_area("Notlar", "Ödeme peşin.", key="teklif_notlar")
+                teklif_mail = st.text_input("Alıcı E-Posta", value=otomatik_mail, key="teklif_alici_mail_key")
+                notlar = st.text_area("Notlar", "Ödeme peşin.", key="teklif_notlar_key")
             
             with col_btn:
                 st.write("##")
-                mail_gonderilsin = st.checkbox("Mail Gönder", value=True, key="mail_chk")
+                mail_gonderilsin = st.checkbox("Mail Gönder", value=True, key="mail_chk_key")
                 
-                if st.button("✅ Kaydet", type="primary", use_container_width=True, key="teklif_tamamla_btn"):
+                if st.button("✅ Kaydet", type="primary", use_container_width=True, key="teklif_tamamla_btn_key"):
                     if final_musteri:
                         urun_ozeti = f"{len(st.session_state.sepet)} Kalem: " + ", ".join([item['Urun'] for item in st.session_state.sepet])
                         ws_teklif.append_row([
@@ -330,12 +329,12 @@ if check_password():
         
         with st.expander("Yeni Ürün Tanımla"):
             c1, c2, c3, c4 = st.columns(4)
-            kod = c1.text_input("Kod", key="yeni_urun_kod")
-            ad = c2.text_input("Ad", key="yeni_urun_ad")
-            fiyat = c3.number_input("Fiyat", key="yeni_urun_fiyat")
-            # ÖNEMLİ: Buraya da 'key' ekledik, Teklif ile karışmasın
-            para = c4.selectbox("Birim", ["TL", "USD", "EUR"], key="yeni_urun_para_input")
-            if st.button("Ekle", key="yeni_urun_ekle_btn"):
+            kod = c1.text_input("Kod", key="yeni_urun_kod_key")
+            ad = c2.text_input("Ad", key="yeni_urun_ad_key")
+            fiyat = c3.number_input("Fiyat", key="yeni_urun_fiyat_key")
+            # KRİTİK DÜZELTME: Buraya da benzersiz KEY eklendi
+            para = c4.selectbox("Birim", ["TL", "USD", "EUR"], key="yeni_urun_para_input_key")
+            if st.button("Ekle", key="yeni_urun_ekle_btn_key"):
                 ws_fiyat.append_row([kod, ad, fiyat, para])
                 st.success("Eklendi.")
 
