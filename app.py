@@ -1,10 +1,9 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 import plotly.express as px
-import plotly.graph_objects as go
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -18,30 +17,17 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Özel CSS ile Profesyonel Görünüm
+# Özel CSS
 st.markdown("""
 <style>
-    /* Ana Arka Plan ve Fontlar */
-    .stApp {
-        background-color: #f8f9fa;
-        font-family: 'Segoe UI', sans-serif;
-    }
-    
-    /* Metrik Kartları (KPI) */
+    .stApp {background-color: #f8f9fa;}
     div[data-testid="metric-container"] {
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
         padding: 20px;
         border-radius: 10px;
         box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        transition: transform 0.2s;
     }
-    div[data-testid="metric-container"]:hover {
-        transform: translateY(-5px);
-        border-color: #2e86de;
-    }
-    
-    /* Butonlar */
     div.stButton > button {
         background: linear-gradient(90deg, #2e86de 0%, #0984e3 100%);
         color: white;
@@ -51,20 +37,6 @@ st.markdown("""
         font-weight: bold;
         width: 100%;
     }
-    div.stButton > button:hover {
-        background: linear-gradient(90deg, #0984e3 0%, #74b9ff 100%);
-        box-shadow: 0 4px 12px rgba(46, 134, 222, 0.4);
-    }
-    
-    /* Sidebar */
-    section[data-testid="stSidebar"] {
-        background-color: #2c3e50;
-    }
-    section[data-testid="stSidebar"] h1, h2, h3, p, span, div {
-        color: #ecf0f1 !important;
-    }
-    
-    /* Tablo Başlıkları */
     thead tr th {
         background-color: #2e86de !important;
         color: white !important;
@@ -78,13 +50,14 @@ if 'sepet' not in st.session_state:
     st.session_state.sepet = []
 
 def check_password():
-    """Güvenli Giriş Ekranı"""
+    """Güvenli Giriş Ekranı (Düzeltildi)"""
     def password_entered():
-        if (st.session_state["username"] in st.secrets["users"] and 
-            st.session_state["password"] == st.secrets["users"][st.session_state["username"]]):
+        # Session state içindeki key ile secrets içindeki key eşleşmeli
+        if (st.session_state["login_user"] in st.secrets["users"] and 
+            st.session_state["login_pass"] == st.secrets["users"][st.session_state["login_user"]]):
             st.session_state["password_correct"] = True
-            del st.session_state["password"]
-            del st.session_state["username"]
+            del st.session_state["login_pass"]
+            del st.session_state["login_user"]
         else:
             st.session_state["password_correct"] = False
 
@@ -92,12 +65,14 @@ def check_password():
         col1, col2, col3 = st.columns([1, 1, 1])
         with col2:
             st.markdown("<h1 style='text-align: center; color:#2e86de;'>💎 AKÇA CRM</h1>", unsafe_allow_html=True)
-            st.markdown("<p style='text-align: center; color:gray;'>Profesyonel Satış Yönetimi</p>", unsafe_allow_html=True)
             st.text_input("Kullanıcı Adı", key="login_user")
             st.text_input("Şifre", type="password", key="login_pass")
             st.button("Giriş Yap", on_click=password_entered)
         return False
     elif not st.session_state["password_correct"]:
+        st.text_input("Kullanıcı Adı", key="login_user_retry")
+        st.text_input("Şifre", type="password", key="login_pass_retry")
+        st.button("Giriş Yap", on_click=password_entered)
         st.error("Hatalı giriş.")
         return False
     else:
@@ -134,11 +109,9 @@ def mail_gonder_generic(alici_email, konu, html_icerik):
     except:
         return False
 
-# --- YAPAY ZEKA SİMÜLASYONU (ANALİZ MOTORU) ---
+# --- YAPAY ZEKA SİMÜLASYONU ---
 def yapay_zeka_analizi(df_teklif, df_ziyaret):
     oneri_listesi = []
-    
-    # 1. Kayıp Müşteri Analizi
     bugun = datetime.now()
     if not df_ziyaret.empty and "Tarih" in df_ziyaret.columns:
         df_ziyaret['Tarih'] = pd.to_datetime(df_ziyaret['Tarih'], errors='coerce')
@@ -146,26 +119,12 @@ def yapay_zeka_analizi(df_teklif, df_ziyaret):
         for firma, tarih in son_ziyaretler.items():
             gecen_gun = (bugun - tarih).days
             if gecen_gun > 30:
-                oneri_listesi.append(f"⚠️ **{firma}** firmasını {gecen_gun} gündür ziyaret etmedin. Kendini hatırlat!")
-
-    # 2. Satış Performansı
+                oneri_listesi.append(f"⚠️ **{firma}** firmasını {gecen_gun} gündür ziyaret etmedin!")
     if not df_teklif.empty and "Toplam Tutar" in df_teklif.columns:
         ciro = df_teklif['Toplam Tutar'].sum()
-        hedef = 1000000
-        if ciro < hedef * 0.2:
-            oneri_listesi.append("📉 Ayın başındayız, teklif sayısını artırman lazım.")
-        elif ciro > hedef * 0.8:
-            oneri_listesi.append("🔥 Harikasın! Hedefe çok yakınsın.")
-
-    # 3. Ürün Trendi
-    if not df_teklif.empty and "Urun" in df_teklif.columns:
-        populer = df_teklif['Urun'].mode()
-        if not populer.empty:
-            oneri_listesi.append(f"⭐ Bu ara en çok **{populer[0]}** satılıyor. Stokları kontrol et.")
-
-    if not oneri_listesi:
-        oneri_listesi.append("✅ Şu an her şey yolunda görünüyor. Sahaya devam!")
-        
+        if ciro < 200000: oneri_listesi.append("📉 Bu ay hedefin gerisindesin, teklif sayısını artır.")
+    
+    if not oneri_listesi: oneri_listesi.append("✅ Her şey yolunda, iyi çalışmalar!")
     return oneri_listesi
 
 # --- ANA UYGULAMA ---
@@ -173,209 +132,113 @@ if check_password():
     client = get_google_sheet_client()
     try:
         sh = client.open("Satis_Raporlari")
-        # Sayfalar
         ws_ziyaret = sh.worksheet("Ziyaretler")
         ws_teklif = sh.worksheet("Teklifler")
         ws_fiyat = sh.worksheet("Fiyat_Listesi")
         
-        # Verileri DataFrame'e Çek
         df_ziyaret = pd.DataFrame(ws_ziyaret.get_all_records())
         df_teklif = pd.DataFrame(ws_teklif.get_all_records())
         df_fiyat = pd.DataFrame(ws_fiyat.get_all_records())
-
-        # Sayısal Dönüşümler (Hata Önleyici)
-        if not df_teklif.empty:
-            if "Toplam Tutar" in df_teklif.columns:
-                df_teklif['Toplam Tutar'] = pd.to_numeric(df_teklif['Toplam Tutar'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
+        
+        if not df_teklif.empty and "Toplam Tutar" in df_teklif.columns:
+             df_teklif['Toplam Tutar'] = pd.to_numeric(df_teklif['Toplam Tutar'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce').fillna(0)
     except Exception as e:
-        st.error(f"Bağlantı Hatası: {e}")
+        st.error(f"Veri Bağlantı Hatası: {e}. Lütfen Secrets ayarlarını kontrol et.")
         st.stop()
 
-    # --- SIDEBAR (SOL MENÜ) ---
     with st.sidebar:
-        st.image("https://cdn-icons-png.flaticon.com/512/3135/3135715.png", width=80)
-        st.title("AKÇA RULMAN")
+        st.title("💎 AKÇA CRM")
+        menu = st.radio("Menü", ["🏠 Dashboard", "👥 Müşteriler", "💰 Teklif Oluştur", "📍 Ziyaret Gir", "⚙️ Ayarlar"])
         st.markdown("---")
-        menu = st.radio("Menü", ["🏠 Dashboard", "👥 Müşteriler (CRM)", "💰 Teklif Oluştur", "📍 Ziyaret Gir", "⚙️ Ayarlar"])
-        
         st.markdown("### 🤖 AI Asistanı")
         oneriler = yapay_zeka_analizi(df_teklif, df_ziyaret)
-        for oneri in oneriler:
-            st.info(oneri)
-        
-        st.markdown("---")
-        st.caption("v3.0 Premium")
+        for oneri in oneriler: st.info(oneri)
 
-    # --- 1. DASHBOARD (PATRON EKRANI) ---
+    # --- 1. DASHBOARD ---
     if menu == "🏠 Dashboard":
-        st.markdown("## 🚀 Satış Performans Paneli")
-        st.markdown("İşlerin genel durumunu buradan takip edebilirsin.")
-        
-        # KPI KARTLARI
+        st.markdown("## 🚀 Satış Performansı")
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        
         toplam_ciro = df_teklif['Toplam Tutar'].sum() if not df_teklif.empty else 0
-        ziyaret_sayisi = len(df_ziyaret)
-        teklif_sayisi = len(df_teklif)
-        bekleyen_teklif = len(df_teklif[df_teklif['Durum'] == 'Beklemede']) if not df_teklif.empty and "Durum" in df_teklif.columns else 0
-
-        kpi1.metric("💰 Toplam Ciro", f"{toplam_ciro:,.0f} TL", "+12%")
-        kpi2.metric("📍 Toplam Ziyaret", ziyaret_sayisi, "+5")
-        kpi3.metric("📝 Verilen Teklif", teklif_sayisi, "Adet")
-        kpi4.metric("⏳ Bekleyen İşler", bekleyen_teklif, "Adet")
+        kpi1.metric("Toplam Ciro", f"{toplam_ciro:,.0f} TL")
+        kpi2.metric("Ziyaret", len(df_ziyaret))
+        kpi3.metric("Teklif Sayısı", len(df_teklif))
+        kpi4.metric("Bekleyen", len(df_teklif[df_teklif['Durum']=='Beklemede']) if not df_teklif.empty and 'Durum' in df_teklif.columns else 0)
         
-        st.markdown("---")
-        
-        # GRAFİKLER
-        c_graf1, c_graf2 = st.columns([2,1])
-        
-        with c_graf1:
-            st.subheader("📈 Aylık Satış Trendi")
+        c1, c2 = st.columns(2)
+        with c1:
+            if not df_teklif.empty and "Durum" in df_teklif.columns:
+                st.subheader("Teklif Durumları")
+                fig = px.donut(df_teklif, names='Durum', hole=0.5)
+                st.plotly_chart(fig, use_container_width=True)
+        with c2:
             if not df_teklif.empty and "Tarih" in df_teklif.columns:
+                st.subheader("Satış Trendi")
                 df_teklif['Tarih'] = pd.to_datetime(df_teklif['Tarih'], errors='coerce')
                 trend = df_teklif.groupby(df_teklif['Tarih'].dt.strftime('%Y-%m'))['Toplam Tutar'].sum().reset_index()
-                fig_trend = px.area(trend, x='Tarih', y='Toplam Tutar', color_discrete_sequence=['#2e86de'])
-                st.plotly_chart(fig_trend, use_container_width=True)
-            else:
-                st.info("Grafik için yeterli veri yok.")
+                st.bar_chart(trend.set_index('Tarih'))
 
-        with c_graf2:
-            st.subheader("🍩 Teklif Dağılımı")
-            if not df_teklif.empty and "Durum" in df_teklif.columns:
-                fig_pie = px.donut(df_teklif, names='Durum', hole=0.6, color_discrete_sequence=px.colors.qualitative.Pastel)
-                st.plotly_chart(fig_pie, use_container_width=True)
-            else:
-                st.info("Veri yok.")
-
-    # --- 2. MÜŞTERİLER (CRM) ---
-    elif menu == "👥 Müşteriler (CRM)":
-        st.markdown("## 👥 Müşteri Yönetimi")
-        
-        # Müşteri listesini Ziyaretlerden ve Tekliflerden çıkar
+    # --- 2. MÜŞTERİLER ---
+    elif menu == "👥 Müşteriler":
+        st.markdown("## 👥 Müşteri Listesi")
         musteriler = set()
-        if not df_ziyaret.empty and "Firma Adı" in df_ziyaret.columns:
-            musteriler.update(df_ziyaret["Firma Adı"].unique())
-        if not df_teklif.empty and "Musteri" in df_teklif.columns:
-            musteriler.update(df_teklif["Musteri"].unique())
-        
-        musteri_df = pd.DataFrame(list(musteriler), columns=["Firma Adı"])
-        
-        # Tab 
-        tab1, tab2 = st.tabs(["📋 Müşteri Listesi", "➕ Yeni Müşteri Ekle"])
-        
-        with tab1:
-            st.dataframe(musteri_df, use_container_width=True, hide_index=True)
-            
-        with tab2:
-            col1, col2 = st.columns(2)
-            yeni_firma = col1.text_input("Firma Adı")
-            yeni_yetkili = col2.text_input("Yetkili Kişi")
-            yeni_tel = col1.text_input("Telefon")
-            yeni_email = col2.text_input("E-Posta")
-            
-            if st.button("Müşteriyi Kaydet"):
-                # Ziyaretlere boş bir kayıt atarak müşteriyi sisteme tanıtıyoruz
-                ws_ziyaret.append_row([str(datetime.today().date()), yeni_firma, "", yeni_yetkili, "", yeni_email, "Tanımlama", str(yeni_tel), "", "", "", ""])
-                st.success(f"{yeni_firma} sisteme eklendi!")
+        if not df_ziyaret.empty and "Firma Adı" in df_ziyaret.columns: musteriler.update(df_ziyaret["Firma Adı"].unique())
+        st.dataframe(pd.DataFrame(list(musteriler), columns=["Firma Adı"]), use_container_width=True)
 
-    # --- 3. TEKLİF OLUŞTUR (MODERN) ---
+    # --- 3. TEKLİF OLUŞTUR ---
     elif menu == "💰 Teklif Oluştur":
-        st.markdown("## 💰 Profesyonel Teklif Hazırlama")
+        st.markdown("## 💰 Teklif Oluştur")
+        c1, c2, c3 = st.columns(3)
+        musteri_list = ["Seçiniz"] + list(df_ziyaret["Firma Adı"].unique()) if not df_ziyaret.empty else []
+        secilen_mus = c1.selectbox("Müşteri", musteri_list)
+        tarih = c2.date_input("Tarih", datetime.today())
+        para = c3.selectbox("Para Birimi", ["TL", "USD", "EUR"])
         
-        # Müşteri Seçimi
-        musteri_listesi = ["Seçiniz..."] + list(df_ziyaret["Firma Adı"].unique()) if not df_ziyaret.empty else []
+        col_u1, col_u2 = st.columns([3, 1])
+        urunler = [""] + df_fiyat['Urun Adi'].tolist() if not df_fiyat.empty else []
+        u_secim = col_u1.selectbox("Ürün Seç", urunler)
+        u_manuel = col_u1.text_input("Ürün Adı (Düzenle)", value=u_secim)
         
-        with st.container():
-            c1, c2, c3 = st.columns([2,1,1])
-            secilen_musteri = c1.selectbox("Müşteri Seç", musteri_listesi, key="crm_musteri_sec")
-            tarih = c2.date_input("Tarih", datetime.today())
-            para_birimi = c3.selectbox("Para Birimi", ["TL", "USD", "EUR"])
-
-        st.markdown("---")
-        
-        # Ürün Ekleme Kartı
-        col_urun1, col_urun2 = st.columns([3, 1])
-        
-        with col_urun1:
-            urunler = [""] + df_fiyat['Urun Adi'].tolist() if not df_fiyat.empty else []
-            secilen_urun = st.selectbox("Ürün Listesi", urunler)
+        fiyat_oto = 0.0
+        if u_secim and not df_fiyat.empty:
+            try: fiyat_oto = float(str(df_fiyat[df_fiyat['Urun Adi']==u_secim].iloc[0]['Birim Fiyat']).replace(",", "."))
+            except: pass
             
-            # Otomatik Fiyat
-            oto_fiyat = 0.0
-            if secilen_urun and not df_fiyat.empty:
-                try:
-                    satir = df_fiyat[df_fiyat['Urun Adi'] == secilen_urun].iloc[0]
-                    oto_fiyat = float(str(satir['Birim Fiyat']).replace(",", "."))
-                except: pass
+        adet = col_u2.number_input("Adet", 1, 1000, 1)
+        fiyat = col_u2.number_input("Fiyat", value=fiyat_oto)
+        
+        if st.button("Sepete Ekle"):
+            st.session_state.sepet.append({"Urun": u_manuel, "Adet": adet, "Birim Fiyat": fiyat, "Toplam": adet*fiyat})
+            st.success("Eklendi")
             
-            manuel_urun = st.text_input("Ürün Adı (Düzenle)", value=secilen_urun)
-
-        with col_urun2:
-            adet = st.number_input("Adet", 1, 1000, 1)
-            fiyat = st.number_input("Birim Fiyat", value=oto_fiyat)
-            if st.button("Sepete Ekle 🛒", use_container_width=True):
-                st.session_state.sepet.append({"Urun": manuel_urun, "Adet": adet, "Birim Fiyat": fiyat, "Toplam": adet*fiyat})
-                st.success("Eklendi")
-
-        # Sepet Görüntüleme
         if st.session_state.sepet:
-            st.markdown("### 🛒 Sepetiniz")
-            st.table(pd.DataFrame(st.session_state.sepet))
+            st.table(st.session_state.sepet)
+            toplam = sum(x['Toplam'] for x in st.session_state.sepet)
+            st.markdown(f"<h3 style='text-align:right'>Toplam: {toplam:,.2f} {para}</h3>", unsafe_allow_html=True)
             
-            # Alt Hesaplamalar
-            toplam = sum(item['Toplam'] for item in st.session_state.sepet)
-            col_ozet1, col_ozet2 = st.columns(2)
-            
-            with col_ozet1:
-                iskonto = st.slider("İskonto Oranı (%)", 0, 50, 0)
-                kdv = st.selectbox("KDV Oranı", [0, 10, 20], index=2)
-            
-            iskonto_tutari = toplam * (iskonto/100)
-            kdv_tutari = (toplam - iskonto_tutari) * (kdv/100)
-            genel_toplam = (toplam - iskonto_tutari) + kdv_tutari
-            
-            with col_ozet2:
-                st.markdown(f"""
-                <div style='background-color:#e1f5fe; padding:15px; border-radius:10px; text-align:right;'>
-                    <h4>Genel Toplam: {genel_toplam:,.2f} {para_birimi}</h4>
-                    <small>KDV Dahil</small>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            if st.button("✅ Teklifi Kaydet ve Bitir", type="primary", use_container_width=True):
-                 ozet = f"{len(st.session_state.sepet)} Kalem Ürün"
-                 ws_teklif.append_row([str(tarih), secilen_musteri, ozet, 1, genel_toplam, genel_toplam, "Beklemede", para_birimi])
-                 st.session_state.sepet = []
-                 st.balloons()
-                 st.success("Teklif başarıyla oluşturuldu!")
+            if st.button("✅ Teklifi Kaydet"):
+                ws_teklif.append_row([str(tarih), secilen_mus, f"{len(st.session_state.sepet)} Kalem", 1, toplam, toplam, "Beklemede", para])
+                st.session_state.sepet = []
+                st.success("Kaydedildi!")
 
     # --- 4. ZİYARET GİRİŞİ ---
     elif menu == "📍 Ziyaret Gir":
-        st.markdown("## 📍 Saha Ziyaret Raporu")
-        with st.form("ziyaret_form_new"):
+        st.markdown("## 📍 Ziyaret Ekle")
+        with st.form("ziyaret"):
             c1, c2 = st.columns(2)
-            firma = c1.text_input("Firma Adı")
-            kisi = c2.text_input("Görüşülen Kişi")
-            konum = c1.text_input("Konum / Adres")
-            sonuc = c2.selectbox("Görüşme Sonucu", ["Olumlu", "Teklif İstedi", "Satış", "Red"])
-            
-            notlar = st.text_area("Görüşme Detayları")
-            
-            if st.form_submit_button("Raporu Kaydet"):
-                ws_ziyaret.append_row([str(datetime.today().date()), firma, konum, kisi, "", "", sonuc, "", "", "", "", "", "", "", notlar])
-                st.success("Ziyaret kaydedildi.")
+            f = c1.text_input("Firma")
+            k = c2.text_input("Kişi")
+            d = c2.selectbox("Durum", ["Olumlu", "Teklif", "Satış", "Red"])
+            if st.form_submit_button("Kaydet"):
+                ws_ziyaret.append_row([str(datetime.today().date()), f, "", k, "", "", d, "", "", "", "", "", "", "", ""])
+                st.success("Kaydedildi")
 
     # --- 5. AYARLAR ---
     elif menu == "⚙️ Ayarlar":
-        st.header("⚙️ Sistem Ayarları")
-        st.info("Bu alanda ürün ekleme, kullanıcı yetkileri ve Excel bağlantı ayarları yapılır.")
-        
-        with st.expander("Ürün Ekle / Düzenle"):
-            st.dataframe(df_fiyat)
-            c1, c2, c3 = st.columns(3)
-            y_kod = c1.text_input("Yeni Kod")
-            y_ad = c2.text_input("Yeni Ürün Adı")
-            y_fiyat = c3.number_input("Fiyat")
-            if st.button("Listeye Ekle"):
-                ws_fiyat.append_row([y_kod, y_ad, y_fiyat, "TL"])
-                st.success("Ürün eklendi.")
+        st.dataframe(df_fiyat)
+        c1, c2, c3 = st.columns(3)
+        yk = c1.text_input("Kod")
+        ya = c2.text_input("Ad")
+        yf = c3.number_input("Fiyat")
+        if st.button("Ürün Ekle"):
+            ws_fiyat.append_row([yk, ya, yf, "TL"])
+            st.success("Eklendi")
