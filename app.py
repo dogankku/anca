@@ -163,7 +163,7 @@ if check_password():
             mail_at = st.checkbox("Teşekkür Maili Gönder")
             if st.form_submit_button("Kaydet"):
                 # Çift Durum sütunu hatasını önlemek için boşlukları temizleyerek gönderiyoruz
-                ws_ziyaret.append_row([str(tarih), firma, "", kisi, "", email, durum, ", ".join(urunler), potansiyel, "", "", "", "", notlar, str(datetime.now())])
+                ws_ziyaret.append_row([str(tarih), firma, "", kisi, "", email, durum, "", ", ".join(urunler), potansiyel, "", "", "", "", notlar, str(datetime.now())])
                 st.success("Kaydedildi.")
                 if mail_at and email:
                     mail_gonder_generic(email, f"Ziyaret Hk. - {firma}", f"Sayın {kisi}, ziyaretiniz için teşekkürler.")
@@ -185,6 +185,7 @@ if check_password():
             mail_sozlugu = {}
             
             if not df_ziyaret.empty:
+                # Sütun isimlerindeki olası boşlukları temizle
                 df_ziyaret.columns = df_ziyaret.columns.str.strip()
                 if "Firma Adı" in df_ziyaret.columns:
                     firmalar = [x for x in df_ziyaret["Firma Adı"].unique() if x]
@@ -201,7 +202,7 @@ if check_password():
         # --- A. ÜST BİLGİLER ---
         col_m1, col_m2, col_m3 = st.columns([2, 1, 1])
         with col_m1:
-            secilen_musteri = st.selectbox("Müşteri Seçiniz", musteri_listesi, key="teklif_musteri")
+            secilen_musteri = st.selectbox("Müşteri Seçiniz", musteri_listesi, key="teklif_musteri_unique") # KEY EKLENDİ
             if secilen_musteri == "➕ Yeni Müşteri":
                 final_musteri = st.text_input("Müşteri Ünvanı Giriniz", key="teklif_yeni_musteri_input")
                 otomatik_mail = ""
@@ -212,8 +213,8 @@ if check_password():
         with col_m2:
             teklif_tarihi = st.date_input("Tarih", datetime.today(), key="teklif_tarih")
         with col_m3:
-            # Benzersiz KEY eklendi:
-            para_birimi = st.selectbox("Para Birimi", ["TL", "USD", "EUR"], key="teklif_para_birimi")
+            # ÖNEMLİ: Burada 'key' ekleyerek Fiyat Listesi ile karışmasını engelledik
+            para_birimi = st.selectbox("Para Birimi", ["TL", "USD", "EUR"], key="teklif_para_birimi_master")
 
         # --- B. ÜRÜN EKLEME ALANI ---
         st.markdown("---")
@@ -332,8 +333,8 @@ if check_password():
             kod = c1.text_input("Kod", key="yeni_urun_kod")
             ad = c2.text_input("Ad", key="yeni_urun_ad")
             fiyat = c3.number_input("Fiyat", key="yeni_urun_fiyat")
-            # Benzersiz KEY eklendi:
-            para = c4.selectbox("Birim", ["TL", "USD", "EUR"], key="yeni_urun_para")
+            # ÖNEMLİ: Buraya da 'key' ekledik, Teklif ile karışmasın
+            para = c4.selectbox("Birim", ["TL", "USD", "EUR"], key="yeni_urun_para_input")
             if st.button("Ekle", key="yeni_urun_ekle_btn"):
                 ws_fiyat.append_row([kod, ad, fiyat, para])
                 st.success("Eklendi.")
